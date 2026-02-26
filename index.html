@@ -327,7 +327,6 @@
 <span class="tag">&lt;script</span>
   <span class="attr">src</span>=<span class="val">"https://storage.googleapis.com/beta-assets/widget.js"</span>
   <span class="attr">data-smgb-gym</span>=<span class="val">"YOUR_GYM_KEY"</span>
-  <span class="attr">crossorigin</span>=<span class="val">"anonymous"</span>
 <span class="tag">&gt;&lt;/script&gt;</span></pre>
       <p style="margin-bottom:0">No build step, no npm, no framework required.</p>
     </div>
@@ -450,10 +449,6 @@
           <td><code>_fbp</code> browser fingerprint + <code>_fbc</code> click attribution cookie</td>
         </tr>
         <tr>
-          <td><strong>Page context</strong></td>
-          <td><code>smgb_ref_url</code> (current page URL), <code>smgb_ref_title</code> (page title)</td>
-        </tr>
-        <tr>
           <td><strong>postMessage</strong></td>
           <td>Analytics payload sent into the iframe on load for in-widget attribution</td>
         </tr>
@@ -470,14 +465,13 @@
   <section>
     <h2><span class="h2-num">6</span> Global Configuration</h2>
     <div class="card">
-      <p><code>window.SMGBConfig</code> is read lazily when a widget opens, so it can be set anywhere on the page. Useful for switching between production and dev environments:</p>
+      <p><code>window.SMGBConfig</code> is read lazily when a widget opens, so it can be set anywhere on the page:</p>
       <pre><span class="tag">&lt;script&gt;</span>
   <span class="kw">window</span>.SMGBConfig = {
-    gym:     <span class="str">"8"</span>,
-    baseUrl: <span class="str">"https://widgets-dev-kpe3ohblca-ew.a.run.app"</span>  <span class="cmt">// omit for production</span>
+    gym:     <span class="str">"8"</span>
   };
 <span class="tag">&lt;/script&gt;</span>
-<span class="tag">&lt;script</span> <span class="attr">src</span>=<span class="val">"https://storage.googleapis.com/beta-assets/widget.js"</span><span class="tag">&gt;&lt;/script&gt;</span></pre>
+<span class="tag">&lt;script</span> <span class="attr">src</span>=<span class="val">"https://storage.googleapis.com/beta-assets/widget.js"</span> <span class="attr">data-smgb-gym</span>=<span class="val">"8"</span><span class="tag">&gt;&lt;/script&gt;</span></pre>
     </div>
   </section>
 
