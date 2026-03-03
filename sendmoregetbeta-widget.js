@@ -48,7 +48,7 @@
   /* ─────────────────────────────────────────────
      CONFIG
   ───────────────────────────────────────────── */
-  var DEFAULT_BASE_URL = "https://www.widgets.sendmoregetbeta.com";
+  var DEFAULT_BASE_URL = "https://widgets.sendmoregetbeta.com";
 
   // Capture script tag reference immediately (synchronous, before DOM finishes parsing).
   // document.currentScript is null for cross-origin scripts served from a CDN/GCS,
