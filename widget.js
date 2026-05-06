@@ -333,7 +333,7 @@
 
       if (def.type === "array") {
         attrVal.split(",").map(function (v) { return v.trim(); }).filter(Boolean).forEach(function (v) {
-          qs.append(def.key + "[]", v);
+          qs.append(def.key, v);
         });
       } else if (def.type === "boolean") {
         if (attrVal === "true" || attrVal === "1") qs.set(def.key, "true");
