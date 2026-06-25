@@ -50,6 +50,11 @@
   ───────────────────────────────────────────── */
   var DEFAULT_BASE_URL = "https://widgets.sendmoregetbeta.com";
 
+  // How long to keep retrying the analytics postMessage handshake before giving up.
+  var ANALYTICS_HANDSHAKE_TIMEOUT_MS = 8000;
+  // How often to retry sending while waiting for the child's ack.
+  var ANALYTICS_HANDSHAKE_RETRY_MS = 250;
+
   // Capture script tag reference immediately (synchronous, before DOM finishes parsing).
   // document.currentScript is null for cross-origin scripts served from a CDN/GCS,
   // so fall back to searching by known src pattern or data attributes.
@@ -79,6 +84,17 @@
     return cfg.gym
         || (SCRIPT_TAG && SCRIPT_TAG.getAttribute("data-smgb-gym"))
         || "";
+  }
+
+  /** Derive just the origin (protocol + host) from the configured base URL.
+   *  Used to scope postMessage targetOrigin instead of using "*", and to
+   *  validate the origin of inbound "ack" messages from the child iframe. */
+  function getBaseOrigin() {
+    try {
+      return new URL(getBaseURL()).origin;
+    } catch (e) {
+      return "*";
+    }
   }
 
   /* ─────────────────────────────────────────────
@@ -358,6 +374,11 @@
   var overlay, iframe, loader, closeBtn;
   var previousFocus = null;
 
+  // Handshake state for the cross-origin analytics handoff (see sendAnalyticsHandshake below).
+  var handshakeTimer = null;
+  var handshakeDeadlineTimer = null;
+  var handshakeAcked = false;
+
   function getOrCreateOverlay() {
     if (!overlay) {
       overlay = document.getElementById("smgb-overlay") || buildOverlay();
@@ -371,20 +392,61 @@
       });
       iframe.addEventListener("load", function () {
         loader.classList.add("smgb-hidden");
+        // Kick off (or restart) the analytics handshake every time the iframe
+        // finishes loading — including SPA-internal reloads of the same src.
+        sendAnalyticsHandshake();
       });
 
-      // Communicate analytics cookies INTO the iframe via postMessage once loaded
-      iframe.addEventListener("load", function () {
-        try {
-          var payload = {
-            type: "smgb:analytics",
-            data: Object.assign({}, getTrackingParams(), getAnalyticsParams(), getPageParams())
-          };
-          iframe.contentWindow.postMessage(payload, "*");
-        } catch (e) { /* cross-origin: silently skip */ }
+      // Listen once for the child's ack. We validate the origin so a
+      // compromised/unexpected page embedded elsewhere can't spoof an ack,
+      // and so we don't process messages unrelated to this widget.
+      window.addEventListener("message", function (e) {
+        if (e.data && e.data.type === "smgb:analytics:ack") {
+          var expectedOrigin = getBaseOrigin();
+          if (expectedOrigin !== "*" && e.origin !== expectedOrigin) return;
+          handshakeAcked = true;
+          stopAnalyticsHandshake();
+        }
       });
     }
     return overlay;
+  }
+
+  /**
+   * Cross-origin iframes boot their own JS independently of the parent's
+   * 'load' event, so a single fire-and-forget postMessage sent the instant
+   * 'load' fires frequently arrives before the child has attached its own
+   * message listener — and is lost forever with no error.
+   *
+   * Fix: resend on an interval, scoped to the widget's real origin (not "*"),
+   * until the child acknowledges receipt with a "smgb:analytics:ack" message,
+   * or until we give up after ANALYTICS_HANDSHAKE_TIMEOUT_MS.
+   */
+  function sendAnalyticsHandshake() {
+    stopAnalyticsHandshake();
+    handshakeAcked = false;
+
+    var targetOrigin = getBaseOrigin();
+    var payload = {
+      type: "smgb:analytics",
+      data: Object.assign({}, getTrackingParams(), getAnalyticsParams(), getPageParams())
+    };
+
+    function send() {
+      if (handshakeAcked || !iframe || !iframe.contentWindow) return;
+      try {
+        iframe.contentWindow.postMessage(payload, targetOrigin);
+      } catch (e) { /* cross-origin access exceptions: ignore and keep retrying */ }
+    }
+
+    send(); // immediate attempt
+    handshakeTimer = setInterval(send, ANALYTICS_HANDSHAKE_RETRY_MS);
+    handshakeDeadlineTimer = setTimeout(stopAnalyticsHandshake, ANALYTICS_HANDSHAKE_TIMEOUT_MS);
+  }
+
+  function stopAnalyticsHandshake() {
+    if (handshakeTimer) { clearInterval(handshakeTimer); handshakeTimer = null; }
+    if (handshakeDeadlineTimer) { clearTimeout(handshakeDeadlineTimer); handshakeDeadlineTimer = null; }
   }
 
   function openOverlay(url) {
@@ -410,6 +472,7 @@
     overlay.classList.add("smgb-closing");
     document.body.style.overflow = "";
     document.removeEventListener("keydown", handleKeyDown);
+    stopAnalyticsHandshake();
 
     setTimeout(function () {
       overlay.classList.remove("smgb-open", "smgb-closing");
