@@ -86,6 +86,13 @@
         || "";
   }
 
+  function getGA4MessagingOverride() {
+    var cfg = window.SMGBConfig || {};
+    return cfg.disableMessaging === true
+        || (SCRIPT_TAG && SCRIPT_TAG.getAttribute("data-smgb-disable-messaging") === "true")
+        || false;
+  }
+
   /** Derive just the origin (protocol + host) from the configured base URL.
    *  Used to scope postMessage targetOrigin instead of using "*", and to
    *  validate the origin of inbound "ack" messages from the child iframe. */
@@ -357,6 +364,11 @@
         qs.set(def.key, attrVal);
       }
     });
+    // check if ga4 set up and not explicitly turned off
+    // TODO automatically disable if no ga4 detected
+    if (!getGA4MessagingOverride()) {
+      qs.set("useGA4MessageService", "true")
+    }
 
     // Merge tracking / analytics params
     var tracking = Object.assign({}, getTrackingParams(), getAnalyticsParams(), getPageParams());
