@@ -397,15 +397,24 @@
         sendAnalyticsHandshake();
       });
 
-      // Listen once for the child's ack. We validate the origin so a
-      // compromised/unexpected page embedded elsewhere can't spoof an ack,
-      // and so we don't process messages unrelated to this widget.
+      // Single message listener for everything coming from the widget iframe.
+      // We validate the origin so a compromised/unexpected page embedded
+      // elsewhere can't spoof an ack or fake an event, and so we don't
+      // process messages unrelated to this widget.
       window.addEventListener("message", function (e) {
-        if (e.data && e.data.type === "smgb:analytics:ack") {
-          var expectedOrigin = getBaseOrigin();
-          if (expectedOrigin !== "*" && e.origin !== expectedOrigin) return;
+        var expectedOrigin = getBaseOrigin();
+        if (expectedOrigin !== "*" && e.origin !== expectedOrigin) return;
+        if (!e.data || typeof e.data.type !== "string") return;
+
+        if (e.data.type === "smgb:analytics:ack") {
           handshakeAcked = true;
           stopAnalyticsHandshake();
+          return;
+        }
+
+        if (e.data.type === "smgb:event") {
+          handleInboundEvent(e);
+          return;
         }
       });
     }
@@ -413,14 +422,64 @@
   }
 
   /**
-   * Cross-origin iframes boot their own JS independently of the parent's
-   * 'load' event, so a single fire-and-forget postMessage sent the instant
-   * 'load' fires frequently arrives before the child has attached its own
-   * message listener — and is lost forever with no error.
+   * The widget iframe's GA4 instance (react-ga4) lives on a different origin
+   * from the visitor's perspective, so browsers that block third-party
+   * cookies prevent it from writing/reading its own session cookie at all —
+   * that's the "Unable to set cookie" / "Unable to update session cookie"
+   * gtag.js errors. There is no script-side fix for that; the browser is
+   * deliberately refusing the cookie write because it's cross-site.
    *
-   * Fix: resend on an interval, scoped to the widget's real origin (not "*"),
-   * until the child acknowledges receipt with a "smgb:analytics:ack" message,
-   * or until we give up after ANALYTICS_HANDSHAKE_TIMEOUT_MS.
+   * The fix is to stop expecting the iframe to persist anything itself.
+   * Instead, the widget app reports each analytics event UP to the parent
+   * page via postMessage ("smgb:event"), and the PARENT — which is fully
+   * first-party to the visitor — fires it through its own gtag/react-ga4/
+   * dataLayer instance, where cookies write normally.
+   *
+   * Each inbound event is acknowledged individually so the child's retry
+   * loop for that specific event can stop, mirroring the original
+   * analytics-handshake retry pattern but in the opposite direction.
+   */
+  function handleInboundEvent(e) {
+    var msg = e.data;
+    var eventId = msg.eventId;
+    var name = msg.name;
+    var params = msg.params || {};
+
+    if (!name || typeof name !== "string") return;
+
+    fireAnalyticsEvent(name, params);
+
+    // Ack back to the exact frame that sent it, scoped to its own origin.
+    if (e.source && typeof e.source.postMessage === "function" && eventId) {
+      try {
+        e.source.postMessage({ type: "smgb:event:ack", eventId: eventId }, e.origin);
+      } catch (err) { /* ignore — child will just keep retrying that event until its timeout */ }
+    }
+  }
+
+  /**
+   * Sends page/campaign CONTEXT down to the widget (UTM params, click IDs,
+   * referrer info) so the widget app can display/label things correctly and
+   * attach that context to the events it reports back. This is one-way
+   * context only — it is NOT how analytics actually gets tracked anymore.
+   *
+   * The widget iframe runs on a different origin than the visitor, so
+   * browsers that block third-party cookies stop its own GA4 instance from
+   * writing/reading any cookie at all (the "Unable to set cookie" / "Unable
+   * to update session cookie" gtag.js errors). That's a deliberate browser
+   * policy, not something fixable from script. So tracking now flows the
+   * other direction: the widget reports events UP via "smgb:event" (see
+   * handleInboundEvent), and THIS page — fully first-party to the visitor —
+   * fires them through its own gtag/react-ga4/dataLayer, where cookies
+   * write normally.
+   *
+   * Cross-origin iframes also boot their own JS independently of the
+   * parent's 'load' event, so a single fire-and-forget postMessage sent the
+   * instant 'load' fires can arrive before the child has attached its own
+   * message listener and be lost with no error. Same fix as before: resend
+   * on an interval, scoped to the widget's real origin (not "*"), until the
+   * child acknowledges with "smgb:analytics:ack", or until we give up after
+   * ANALYTICS_HANDSHAKE_TIMEOUT_MS.
    */
   function sendAnalyticsHandshake() {
     stopAnalyticsHandshake();
